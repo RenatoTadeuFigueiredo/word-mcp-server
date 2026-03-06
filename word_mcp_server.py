@@ -32,6 +32,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -76,6 +77,30 @@ def _require_doc() -> Document:
     return _doc
 
 
+def _reload_in_word(path: str):
+    """If Microsoft Word is running and has the file open, reload it via AppleScript."""
+    script = f'''
+tell application "Microsoft Word"
+    set docPath to POSIX file "{path}" as string
+    repeat with d in documents
+        if full name of d is docPath then
+            close d saving no
+            open (POSIX file "{path}")
+            exit repeat
+        end if
+    end repeat
+end tell
+'''
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            timeout=5,
+            capture_output=True,
+        )
+    except Exception:
+        pass  # silently ignore if Word is not running or AppleScript fails
+
+
 def _save(backup: bool = True):
     """Save the current document. Optionally create a .bak backup first."""
     doc = _require_doc()
@@ -83,6 +108,7 @@ def _save(backup: bool = True):
         bak_path = _current_doc_path + ".bak"
         shutil.copy2(_current_doc_path, bak_path)
     doc.save(_current_doc_path)
+    _reload_in_word(_current_doc_path)
 
 
 def _para_style(para) -> str:
@@ -1480,6 +1506,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             path = arguments["path"]
             _require_doc().save(path)
             _current_doc_path = path
+            _reload_in_word(path)
             return ok(f"Saved as: {path}")
 
         elif name == "close_document":
@@ -2791,6 +2818,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             doc.save(path)
             _current_doc_path = path
             _doc = Document(path)
+            _reload_in_word(path)
             return ok(
                 f"Document built: {path}\n"
                 f"Elements: {added} | "
