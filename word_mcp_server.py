@@ -468,40 +468,93 @@ def _add_native_comment(doc: Document, paragraph, text: str,
 # ---------------------------------------------------------------------------
 
 def _insert_toc(doc: Document, title: str = "Table of Contents",
-                max_level: int = 3):
+                max_level: int = 3, after_heading: Optional[str] = None):
     """
-    Insert a Word TOC field at the current end of the document.
-    Word will update the TOC on first open (Ctrl+A, F9).
+    Insert a Word TOC field before the first Heading 1, or after a specified
+    heading. Word will update the TOC on first open (Ctrl+A, F9).
     """
-    # Heading for TOC
+    def _make_toc_heading_para(doc, title):
+        p = OxmlElement("w:p")
+        pPr = OxmlElement("w:pPr")
+        pStyle = OxmlElement("w:pStyle")
+        pStyle.set(qn("w:val"), "TOCHeading")
+        pPr.append(pStyle)
+        p.append(pPr)
+        r = OxmlElement("w:r")
+        t = OxmlElement("w:t")
+        t.text = title
+        r.append(t)
+        p.append(r)
+        return p
+
+    def _make_toc_field_para(doc, max_level):
+        p = OxmlElement("w:p")
+        r_begin = OxmlElement("w:r")
+        fld_begin = OxmlElement("w:fldChar")
+        fld_begin.set(qn("w:fldCharType"), "begin")
+        fld_begin.set(qn("w:dirty"), "true")
+        r_begin.append(fld_begin)
+        p.append(r_begin)
+        r_instr = OxmlElement("w:r")
+        instr = OxmlElement("w:instrText")
+        instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        instr.text = f' TOC \\o "1-{max_level}" \\h \\z \\u '
+        r_instr.append(instr)
+        p.append(r_instr)
+        r_sep = OxmlElement("w:r")
+        fld_sep = OxmlElement("w:fldChar")
+        fld_sep.set(qn("w:fldCharType"), "separate")
+        r_sep.append(fld_sep)
+        p.append(r_sep)
+        r_ph = OxmlElement("w:r")
+        t_ph = OxmlElement("w:t")
+        t_ph.text = "Clique com o botao direito para atualizar o indice."
+        r_ph.append(t_ph)
+        p.append(r_ph)
+        r_end = OxmlElement("w:r")
+        fld_end = OxmlElement("w:fldChar")
+        fld_end.set(qn("w:fldCharType"), "end")
+        r_end.append(fld_end)
+        p.append(r_end)
+        return p
+
+    body = doc.element.body
+
+    # at_end sentinel — just append
+    if after_heading == "__end__":
+        if title:
+            doc.add_paragraph(title, style="TOC Heading")
+        doc.add_paragraph()._p.extend([_make_toc_field_para(doc, max_level)])
+        return
+
+    # Determine the reference element to insert before
+    insert_before = None
+    if after_heading:
+        ref = _find_heading_para(doc, after_heading)
+        if ref is not None:
+            insert_before = ref._p.getnext()
+    if insert_before is None:
+        # Default: insert before the first Heading 1
+        for child in list(body):
+            pStyle = child.find('.//' + qn('w:pStyle'))
+            if pStyle is not None and pStyle.get(qn('w:val')) == 'Heading1':
+                insert_before = child
+                break
+    if insert_before is None:
+        # Fallback: append at end
+        if title:
+            doc.add_paragraph(title, style="TOC Heading")
+        doc.add_paragraph()._p.extend([_make_toc_field_para(doc, max_level)])
+        return
+
+    # Insert before reference: heading first, then field right after heading
+    toc_field = _make_toc_field_para(doc, max_level)
     if title:
-        toc_heading = doc.add_paragraph(title, style="TOC Heading")
-
-    # TOC paragraph with field code
-    toc_para = doc.add_paragraph()
-    toc_para.style = doc.styles["Normal"]
-
-    run = OxmlElement("w:r")
-    fld_begin = OxmlElement("w:fldChar")
-    fld_begin.set(qn("w:fldCharType"), "begin")
-    fld_begin.set(qn("w:dirty"), "true")
-    run.append(fld_begin)
-    toc_para._p.append(run)
-
-    run2 = OxmlElement("w:r")
-    instr = OxmlElement("w:instrText")
-    instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-    instr.text = f' TOC \\o "1-{max_level}" \\h \\z \\u '
-    run2.append(instr)
-    toc_para._p.append(run2)
-
-    run3 = OxmlElement("w:r")
-    fld_end = OxmlElement("w:fldChar")
-    fld_end.set(qn("w:fldCharType"), "end")
-    run3.append(fld_end)
-    toc_para._p.append(run3)
-
-    return toc_para
+        toc_head = _make_toc_heading_para(doc, title)
+        insert_before.addprevious(toc_field)
+        toc_field.addprevious(toc_head)
+    else:
+        insert_before.addprevious(toc_field)
 
 
 # ---------------------------------------------------------------------------
@@ -2488,7 +2541,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             max_level = arguments.get("max_level", 3)
             after_heading = arguments.get("after_heading")
             at_end = arguments.get("at_end", False)
-            _insert_toc(doc, title=title, max_level=max_level)
+            _insert_toc(doc, title=title, max_level=max_level,
+                        after_heading=after_heading if not at_end else "__end__")
             _save()
             return ok(
                 f"TOC inserted (levels 1-{max_level}). "
