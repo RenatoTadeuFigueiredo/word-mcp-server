@@ -2363,7 +2363,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             section.page_width = w
             section.page_height = h
             _save()
-            return ok(f"Page size set to {preset or f'{arguments[\"width_cm\"]}x{arguments[\"height_cm\"]} cm'}.")
+            size_label = preset or f"{arguments.get('width_cm')}x{arguments.get('height_cm')} cm"
+            return ok(f"Page size set to {size_label}.")
 
         elif name == "add_section_break":
             doc = _require_doc()
