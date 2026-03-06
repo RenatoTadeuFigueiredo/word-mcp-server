@@ -2084,7 +2084,21 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             style = arguments.get("style", "Table Grid")
             header_row = arguments.get("header_row", False)
             col_widths = arguments.get("col_widths", [])
+            after_text = arguments.get("after_text")
+            after_heading = arguments.get("after_heading")
 
+            # Find anchor paragraph for positioning
+            anchor_para = None
+            if after_heading:
+                anchor_para = _find_heading_para(doc, after_heading)
+            elif after_text:
+                for p in doc.paragraphs:
+                    if after_text.lower() in p.text.lower():
+                        anchor_para = p
+                        break
+
+            # python-docx always appends tables at the end of the body.
+            # We add it at end first, then move the XML element to the correct position.
             tbl = doc.add_table(rows=rows, cols=cols)
             try:
                 tbl.style = doc.styles[style]
@@ -2123,6 +2137,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     if ci < cols:
                         for row in tbl.rows:
                             row.cells[ci].width = Cm(width_cm)
+
+            # Move table XML element immediately after the anchor paragraph
+            if anchor_para is not None:
+                tbl._tbl.getparent().remove(tbl._tbl)
+                anchor_para._p.addnext(tbl._tbl)
 
             _save()
             return ok(f"Table {rows}x{cols} inserted.")
